@@ -154,6 +154,31 @@ John,Doe,john@example.com,,`
     expect(result[0].isValid).toBe(true)
   })
 
+  it('should mark leads with an invalid country code as invalid', () => {
+    const csv = `firstName,lastName,email,countryCode
+John,Doe,john@example.com,XXX
+Jane,Smith,jane@example.com,12`
+
+    const result = parseCsv(csv)
+
+    expect(result.map((l) => l.isValid)).toEqual([false, false])
+    expect(result[0].errors).toContain('Invalid country code')
+    expect(result[1].errors).toContain('Invalid country code')
+  })
+
+  it('should normalize country code and keep leads without country valid', () => {
+    const csv = `firstName,lastName,email,countryCode
+John,Doe,john@example.com,es
+Jane,Smith,jane@example.com,`
+
+    const result = parseCsv(csv)
+
+    expect(result[0].countryCode).toBe('ES')
+    expect(result[0].isValid).toBe(true)
+    expect(result[1].countryCode).toBeUndefined()
+    expect(result[1].isValid).toBe(true)
+  })
+
   it('should preserve row index correctly', () => {
     const csv = `firstName,lastName,email
 John,Doe,john@example.com
