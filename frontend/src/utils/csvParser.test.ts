@@ -249,3 +249,26 @@ Jane,Johnson,jane@example.com`
     expect(result[0].isValid).toBe(true)
   })
 })
+
+describe('parseCsv new fields', () => {
+  it('maps aliases and normalizes values', () => {
+    const csv = `firstName,lastName,email,countryCode,phoneNumber,yearsInRole,linkedin
+John,Doe,john@example.com,es,600 12 31 23,4,linkedin.com/in/john`
+    const [lead] = parseCsv(csv)
+    expect(lead.isValid).toBe(true)
+    expect(lead.phone).toBe('+34600123123')
+    expect(lead.yearsAtCompany).toBe(4)
+    expect(lead.linkedinUrl).toBe('https://linkedin.com/in/john')
+  })
+
+  it('flags invalid years and linkedin urls', () => {
+    const csv = `firstName,lastName,email,yearsAtCompany,linkedinUrl
+John,Doe,john@example.com,-2,https://example.com/in/john`
+    const [lead] = parseCsv(csv)
+    expect(lead.isValid).toBe(false)
+    expect(lead.errors).toEqual([
+      'Years at company must be a whole number >= 0',
+      'LinkedIn URL must be a linkedin.com link',
+    ])
+  })
+})

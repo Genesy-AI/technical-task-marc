@@ -207,3 +207,23 @@ describe('generateMessageFromTemplate', () => {
     })
   })
 })
+
+describe('generateMessageFromTemplate new fields', () => {
+  it('supports phone, yearsAtCompany (including 0) and linkedinUrl', () => {
+    const lead: Lead = {
+      firstName: 'Ann',
+      phone: '+34600123123',
+      yearsAtCompany: 0,
+      linkedinUrl: 'https://linkedin.com/in/ann',
+    }
+    expect(generateMessageFromTemplate('{firstName} {phone} {yearsAtCompany} {linkedinUrl}', lead)).toBe(
+      'Ann +34600123123 0 https://linkedin.com/in/ann'
+    )
+  })
+
+  it('throws when a new field is missing', () => {
+    expect(() => generateMessageFromTemplate('{yearsAtCompany}', { firstName: 'Ann' })).toThrow(
+      'Missing required field: yearsAtCompany'
+    )
+  })
+})

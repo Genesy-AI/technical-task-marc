@@ -1,8 +1,17 @@
 import { FC, useState, useEffect, useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { api } from '../api'
+import { LeadFieldDef } from '../utils/leadFields'
+import {
+  completeVariable,
+  findOpenVariable,
+  previewTemplate,
+  searchFields,
+  TEMPLATE_FIELDS,
+} from '../utils/templateFields'
+import { useActiveField, VariablePicker, VariableSuggestions } from './TemplateVariablePicker'
 
 interface MessageTemplateModalProps {
   isOpen: boolean
@@ -25,6 +34,21 @@ export const MessageTemplateModal: FC<MessageTemplateModalProps> = ({
   } | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const queryClient = useQueryClient()
+  const [caret, setCaret] = useState(0)
+  const [suggestionsDismissed, setSuggestionsDismissed] = useState(false)
+
+  // Same query as the leads list, so it is normally already cached
+  const leads = useQuery({
+    queryKey: ['leads', 'getMany'],
+    queryFn: async () => api.leads.getMany(),
+    enabled: isOpen,
+  })
+  const previewLead = leads.data?.find((lead) => lead.id === selectedLeadIds[0])
+
+  const openVariable = suggestionsDismissed ? null : findOpenVariable(template, caret)
+  const suggestionFields = openVariable ? searchFields(openVariable.query) : []
+  const suggestions = useActiveField(suggestionFields)
+  const showSuggestions = openVariable !== null && suggestionFields.length > 0
 
   const generateMessagesMutation = useMutation({
     mutationFn: async (data: { leadIds: number[]; template: string }) => api.leads.generateMessages(data),
@@ -86,7 +110,8 @@ export const MessageTemplateModal: FC<MessageTemplateModalProps> = ({
 
   useEffect(() => {
     const handleEscapeKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isOpen) {
+      // Inner popups (field picker, autocomplete) handle Escape themselves and mark the event
+      if (e.key === 'Escape' && isOpen && !e.defaultPrevented) {
         handleClose()
       }
     }
@@ -106,22 +131,53 @@ export const MessageTemplateModal: FC<MessageTemplateModalProps> = ({
     }
   }, [isOpen, handleClose])
 
-  const availableFields = ['firstName', 'lastName', 'email', 'jobTitle', 'companyName', 'countryCode']
+  const moveCaret = (position: number) => {
+    setCaret(position)
+    setTimeout(() => {
+      textareaRef.current?.focus()
+      textareaRef.current?.setSelectionRange(position, position)
+    }, 0)
+  }
 
-  const insertField = (field: string) => {
-    if (textareaRef.current) {
-      const textarea = textareaRef.current
-      const start = textarea.selectionStart
-      const end = textarea.selectionEnd
-      const newTemplate = template.substring(0, start) + `{${field}}` + template.substring(end)
-      setTemplate(newTemplate)
+  const insertField = (field: LeadFieldDef) => {
+    const textarea = textareaRef.current
+    if (!textarea) return
+    const start = textarea.selectionStart
+    const end = textarea.selectionEnd
+    const inserted = `{${field.key}}`
+    setTemplate(template.substring(0, start) + inserted + template.substring(end))
+    setSuggestionsDismissed(false)
+    moveCaret(start + inserted.length)
+  }
 
-      setTimeout(() => {
-        textarea.focus()
-        textarea.setSelectionRange(start + field.length + 2, start + field.length + 2)
-      }, 0)
+  const acceptSuggestion = (field: LeadFieldDef) => {
+    if (!openVariable) return
+    const result = completeVariable(template, caret, openVariable.start, field.key)
+    setTemplate(result.template)
+    moveCaret(result.caret)
+  }
+
+  const handleTemplateKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (!showSuggestions) return
+
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault()
+      suggestions.move(e.key === 'ArrowDown' ? 1 : -1)
+    } else if ((e.key === 'Enter' || e.key === 'Tab') && suggestions.active) {
+      e.preventDefault()
+      acceptSuggestion(suggestions.active)
+    } else if (e.key === 'Escape') {
+      // Close only the suggestions, not the whole modal
+      e.preventDefault()
+      e.stopPropagation()
+      setSuggestionsDismissed(true)
     }
   }
+
+  const syncCaret = (e: React.SyntheticEvent<HTMLTextAreaElement>) => setCaret(e.currentTarget.selectionStart)
+
+  const previewParts = template.trim() && previewLead ? previewTemplate(template, previewLead) : []
+  const previewProblems = previewParts.filter((part) => part.kind === 'missing' || part.kind === 'unknown')
 
   if (!isOpen) return null
 
@@ -156,28 +212,37 @@ export const MessageTemplateModal: FC<MessageTemplateModalProps> = ({
                 Message Template
               </label>
               <div className="space-y-3">
-                <div className="flex flex-wrap gap-2">
-                  <span className="text-sm text-gray-600">Insert field:</span>
-                  {availableFields.map((field) => (
-                    <button
-                      key={field}
-                      type="button"
-                      onClick={() => insertField(field)}
-                      className="px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded hover:bg-blue-200 transition-colors"
-                    >
-                      {`{${field}}`}
-                    </button>
-                  ))}
+                <div className="flex flex-wrap items-center gap-2">
+                  <VariablePicker fields={TEMPLATE_FIELDS} sample={previewLead} onSelect={insertField} />
+                  <span className="text-xs text-gray-500">or type {'{'} in the message to autocomplete</span>
                 </div>
-                <textarea
-                  ref={textareaRef}
-                  id="message-template"
-                  value={template}
-                  onChange={(e) => setTemplate(e.target.value)}
-                  placeholder="Enter your message template here. Use {fieldName} to insert dynamic values.&#10;&#10;Example: Hi {firstName}, I noticed you work at {companyName} as a {jobTitle}. Would you be interested in..."
-                  className="w-full h-32 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
-                  required
-                />
+                <div className="relative">
+                  <textarea
+                    ref={textareaRef}
+                    id="message-template"
+                    value={template}
+                    onChange={(e) => {
+                      setTemplate(e.target.value)
+                      setCaret(e.target.selectionStart)
+                      setSuggestionsDismissed(false)
+                    }}
+                    onKeyDown={handleTemplateKeyDown}
+                    onKeyUp={syncCaret}
+                    onClick={syncCaret}
+                    placeholder="Enter your message template here. Use {fieldName} to insert dynamic values.&#10;&#10;Example: Hi {firstName}, I noticed you work at {companyName} as a {jobTitle}. Would you be interested in..."
+                    className="w-full h-32 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
+                    required
+                  />
+                  {showSuggestions && (
+                    <VariableSuggestions
+                      fields={suggestionFields}
+                      sample={previewLead}
+                      activeKey={suggestions.active?.key}
+                      onSelect={acceptSuggestion}
+                      onHover={(field) => suggestions.setActiveKey(field.key)}
+                    />
+                  )}
+                </div>
               </div>
               <p className="mt-2 text-sm text-gray-500">
                 Use curly braces around field names (e.g., {`{firstName}`}) to insert dynamic values. If a
@@ -185,6 +250,51 @@ export const MessageTemplateModal: FC<MessageTemplateModalProps> = ({
                 lead.
               </p>
             </div>
+
+            {previewParts.length > 0 && previewLead && (
+              <div>
+                <h3 className="text-sm font-medium text-gray-700 mb-2">
+                  Preview for {`${previewLead.firstName} ${previewLead.lastName ?? ''}`.trim()}
+                </h3>
+                <div
+                  className="px-3 py-2 bg-gray-50 border border-gray-200 rounded-md text-sm text-gray-900 whitespace-pre-wrap break-words"
+                  aria-live="polite"
+                >
+                  {previewParts.map((part, index) =>
+                    part.kind === 'text' ? (
+                      <span key={index}>{part.text}</span>
+                    ) : (
+                      <span
+                        key={index}
+                        title={
+                          part.kind === 'missing'
+                            ? 'This lead has no value for this field'
+                            : part.kind === 'unknown'
+                              ? 'Unknown field'
+                              : undefined
+                        }
+                        className={`rounded px-0.5 ${
+                          part.kind === 'value'
+                            ? 'bg-blue-100 text-blue-800'
+                            : part.kind === 'missing'
+                              ? 'bg-red-100 text-red-800'
+                              : 'bg-yellow-100 text-yellow-800'
+                        }`}
+                      >
+                        {part.text}
+                      </span>
+                    )
+                  )}
+                </div>
+                {previewProblems.length > 0 && (
+                  <p className="mt-2 text-sm text-red-600">
+                    No message will be generated for this lead:{' '}
+                    {previewProblems.map((p) => p.text).join(', ')}{' '}
+                    {previewProblems.some((p) => p.kind === 'unknown') ? 'unknown or ' : ''}missing.
+                  </p>
+                )}
+              </div>
+            )}
 
             {generationResult && (
               <div className="space-y-4">

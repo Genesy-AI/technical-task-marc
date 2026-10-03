@@ -3,7 +3,8 @@ import express, { Request, Response } from 'express'
 import { Connection, Client, WorkflowExecutionAlreadyStartedError } from '@temporalio/client'
 import { enrichPhoneWorkflow, verifyEmailWorkflow } from './workflows'
 import { generateMessageFromTemplate } from './utils/messageGenerator'
-import { isValidCountryCode, normalizeCountryCode } from './utils/countryCode'
+import { parseLead } from './utils/leadFields'
+import { Prisma } from '@prisma/client'
 import { runTemporalWorker } from './worker'
 let temporalClient: Promise<Client> | undefined
 function getTemporalClient() {
@@ -187,60 +188,41 @@ app.post('/leads/bulk', async (req: Request, res: Response) => {
   }
 
   try {
-    const validLeads = leads.filter((lead) => {
-      return (
-        lead.firstName &&
-        lead.lastName &&
-        lead.email &&
-        typeof lead.firstName === 'string' &&
-        lead.firstName.trim() &&
-        typeof lead.lastName === 'string' &&
-        lead.lastName.trim() &&
-        typeof lead.email === 'string' &&
-        lead.email.trim() &&
-        isValidCountryCode(lead.countryCode)
-      )
-    })
+    const parsedLeads = leads.map((lead) =>
+      lead && typeof lead === 'object' ? parseLead(lead) : { values: null, errors: ['Invalid lead'] }
+    )
+    const validLeads = parsedLeads.flatMap((parsed) => (parsed.errors.length === 0 ? [parsed.values!] : []))
 
     if (validLeads.length === 0) {
       return res.status(400).json({
         error:
-          'No valid leads found. firstName, lastName, and email are required; countryCode, if present, must be a valid ISO 3166-1 alpha-2 code.',
+          'No valid leads found. firstName, lastName, and email are required; countryCode must be an ISO 3166-1 alpha-2 code, yearsAtCompany a whole number >= 0 and linkedinUrl a linkedin.com link.',
+        details: parsedLeads.slice(0, 10).map((parsed) => parsed.errors),
       })
     }
 
     const existingLeads = await prisma.lead.findMany({
       where: {
         OR: validLeads.map((lead) => ({
-          AND: [{ firstName: lead.firstName.trim() }, { lastName: lead.lastName.trim() }],
+          AND: [{ firstName: lead.firstName as string }, { lastName: lead.lastName as string }],
         })),
       },
     })
 
-    const leadKeys = new Set(
-      existingLeads.map((lead) => `${lead.firstName.toLowerCase()}_${(lead.lastName || '').toLowerCase()}`)
-    )
+    const leadKey = (firstName: string, lastName: string | null) =>
+      `${firstName.toLowerCase()}_${(lastName || '').toLowerCase()}`
+    const leadKeys = new Set(existingLeads.map((lead) => leadKey(lead.firstName, lead.lastName)))
 
-    const uniqueLeads = validLeads.filter((lead) => {
-      const key = `${lead.firstName.toLowerCase()}_${lead.lastName.toLowerCase()}`
-      return !leadKeys.has(key)
-    })
+    const uniqueLeads = validLeads.filter(
+      (lead) => !leadKeys.has(leadKey(lead.firstName as string, lead.lastName as string))
+    )
 
     let importedCount = 0
     const errors: Array<{ lead: any; error: string }> = []
 
     for (const lead of uniqueLeads) {
       try {
-        await prisma.lead.create({
-          data: {
-            firstName: lead.firstName.trim(),
-            lastName: lead.lastName.trim(),
-            email: lead.email.trim(),
-            jobTitle: lead.jobTitle ? lead.jobTitle.trim() : null,
-            countryCode: normalizeCountryCode(lead.countryCode),
-            companyName: lead.companyName ? lead.companyName.trim() : null,
-          },
-        })
+        await prisma.lead.create({ data: lead as Prisma.leadCreateInput })
         importedCount++
       } catch (error) {
         errors.push({

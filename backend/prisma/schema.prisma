@@ -22,4 +22,6 @@ model lead {
   phone                 String?
   phoneProvider         String?
   phoneEnrichmentStatus String?
+  yearsAtCompany        Int?
+  linkedinUrl           String?
 }

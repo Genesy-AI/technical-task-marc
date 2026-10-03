@@ -4,6 +4,28 @@ import toast from 'react-hot-toast'
 import { api, ApiOutput } from '../api'
 import { MessageTemplateModal } from './MessageTemplateModal'
 import { CsvImportModal } from './CsvImportModal'
+import { LEAD_FIELDS, LeadFieldDef } from '../utils/leadFields'
+
+const LIST_COLUMNS = LEAD_FIELDS.filter((f) => f.listColumn)
+
+const ListCell: FC<{ field: LeadFieldDef; value: unknown }> = ({ field, value }) => {
+  if (value === null || value === undefined || value === '') {
+    return <div className="text-sm text-gray-900">-</div>
+  }
+  if (field.link) {
+    return (
+      <a
+        href={String(value)}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-sm text-blue-600 hover:underline"
+      >
+        {String(value).replace(/^https?:\/\/(www\.)?/, '')}
+      </a>
+    )
+  }
+  return <div className="text-sm text-gray-900">{String(value)}</div>
+}
 
 const PROVIDER_LABELS: Record<string, string> = {
   orionConnect: 'Orion Connect',
@@ -306,15 +328,11 @@ export const LeadsList: FC = () => {
                 <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
                   Phone
                 </th>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
-                  Job Title
-                </th>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
-                  Company
-                </th>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
-                  Country
-                </th>
+                {LIST_COLUMNS.map((field) => (
+                  <th key={field.key} scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
+                    {field.label}
+                  </th>
+                ))}
                 <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
                   Message
                 </th>
@@ -350,15 +368,11 @@ export const LeadsList: FC = () => {
                   <td className="px-6 py-4 whitespace-nowrap">
                     <PhoneCell lead={lead} />
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-900">{lead.jobTitle || '-'}</div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-900">{lead.companyName || '-'}</div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-900">{lead.countryCode || '-'}</div>
-                  </td>
+                  {LIST_COLUMNS.map((field) => (
+                    <td key={field.key} className="px-6 py-4 whitespace-nowrap">
+                      <ListCell field={field} value={lead[field.key as keyof typeof lead]} />
+                    </td>
+                  ))}
                   <td className="px-6 py-4">
                     <div className="text-sm text-gray-900 max-w-xs truncate" title={lead.message || ''}>
                       {lead.message || '-'}
