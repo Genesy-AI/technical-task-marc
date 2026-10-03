@@ -8,7 +8,7 @@ Take-home: gestor de leads (CSV import, verificación de email, generación de m
 - pnpm en ambos paquetes (no hay workspace raíz).
 
 ## Estructura
-- `backend/src/index.ts`: todas las rutas Express (`/leads`, `/leads/bulk`, `/leads/generate-messages`, `/leads/verify-emails`) y arranque del worker.
+- `backend/src/index.ts`: todas las rutas Express (`/leads`, `/leads/bulk`, `/leads/generate-messages`, `/leads/verify-emails`, `/leads/enrich-phone`) y arranque del worker.
 - `backend/src/worker.ts`: worker de Temporal (`localhost:7233`, namespace `default`, task queue `myQueue`).
 - `backend/src/workflows/`: `workflows.ts`, `activities/`, `index.ts` (re-exporta los workflows).
 - `backend/src/utils/`: lógica pura (`messageGenerator.ts` + test al lado).
@@ -41,4 +41,4 @@ Tras cambiar `schema.prisma`: `pnpm migrate:dev` (genera migración y cliente).
 
 ## Ojos con
 - `frontend/src/api/modules/leads.ts` usa `PUT /leads/:id` pero el backend expone `PATCH`.
-- `backend/.env.sample` habla de MySQL pero el datasource real es SQLite con `file:./dev.db`; no hace falta `.env` en backend.
+- El datasource real es SQLite con `file:./dev.db`; `backend/.env` es opcional y solo sobrescribe URLs/keys de los proveedores de teléfono (ver `.env.sample`).
