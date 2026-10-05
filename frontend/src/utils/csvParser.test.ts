@@ -154,6 +154,31 @@ John,Doe,john@example.com,,`
     expect(result[0].isValid).toBe(true)
   })
 
+  it('should mark leads with an invalid country code as invalid', () => {
+    const csv = `firstName,lastName,email,countryCode
+John,Doe,john@example.com,XXX
+Jane,Smith,jane@example.com,12`
+
+    const result = parseCsv(csv)
+
+    expect(result.map((l) => l.isValid)).toEqual([false, false])
+    expect(result[0].errors).toContain('Invalid country code')
+    expect(result[1].errors).toContain('Invalid country code')
+  })
+
+  it('should normalize country code and keep leads without country valid', () => {
+    const csv = `firstName,lastName,email,countryCode
+John,Doe,john@example.com,es
+Jane,Smith,jane@example.com,`
+
+    const result = parseCsv(csv)
+
+    expect(result[0].countryCode).toBe('ES')
+    expect(result[0].isValid).toBe(true)
+    expect(result[1].countryCode).toBeUndefined()
+    expect(result[1].isValid).toBe(true)
+  })
+
   it('should preserve row index correctly', () => {
     const csv = `firstName,lastName,email
 John,Doe,john@example.com
@@ -222,5 +247,28 @@ Jane,Johnson,jane@example.com`
     expect(result[0].lastName).toBe('Doe')
     expect(result[0].email).toBe('john@example.com')
     expect(result[0].isValid).toBe(true)
+  })
+})
+
+describe('parseCsv new fields', () => {
+  it('maps aliases and normalizes values', () => {
+    const csv = `firstName,lastName,email,countryCode,phoneNumber,yearsInRole,linkedin
+John,Doe,john@example.com,es,600 12 31 23,4,linkedin.com/in/john`
+    const [lead] = parseCsv(csv)
+    expect(lead.isValid).toBe(true)
+    expect(lead.phone).toBe('+34600123123')
+    expect(lead.yearsAtCompany).toBe(4)
+    expect(lead.linkedinUrl).toBe('https://linkedin.com/in/john')
+  })
+
+  it('flags invalid years and linkedin urls', () => {
+    const csv = `firstName,lastName,email,yearsAtCompany,linkedinUrl
+John,Doe,john@example.com,-2,https://example.com/in/john`
+    const [lead] = parseCsv(csv)
+    expect(lead.isValid).toBe(false)
+    expect(lead.errors).toEqual([
+      'Years at company must be a whole number >= 0',
+      'LinkedIn URL must be a linkedin.com link',
+    ])
   })
 })

@@ -12,4 +12,9 @@ export type LeadsGetManyOutput = {
   companyName: string | null
   message: string | null
   emailVerified: boolean | null
+  phone: string | null
+  phoneProvider: string | null
+  phoneEnrichmentStatus: 'pending' | 'found' | 'not_found' | 'failed' | null
+  yearsAtCompany: number | null
+  linkedinUrl: string | null
 }[]

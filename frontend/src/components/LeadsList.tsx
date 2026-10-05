@@ -1,9 +1,65 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { FC, useState } from 'react'
+import { FC, useEffect, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
-import { api } from '../api'
+import { api, ApiOutput } from '../api'
 import { MessageTemplateModal } from './MessageTemplateModal'
 import { CsvImportModal } from './CsvImportModal'
+import { LEAD_FIELDS, LeadFieldDef } from '../utils/leadFields'
+
+const LIST_COLUMNS = LEAD_FIELDS.filter((f) => f.listColumn)
+
+const ListCell: FC<{ field: LeadFieldDef; value: unknown }> = ({ field, value }) => {
+  if (value === null || value === undefined || value === '') {
+    return <div className="text-sm text-gray-900">-</div>
+  }
+  if (field.link) {
+    return (
+      <a
+        href={String(value)}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-sm text-blue-600 hover:underline"
+      >
+        {String(value).replace(/^https?:\/\/(www\.)?/, '')}
+      </a>
+    )
+  }
+  return <div className="text-sm text-gray-900">{String(value)}</div>
+}
+
+const PROVIDER_LABELS: Record<string, string> = {
+  orionConnect: 'Orion Connect',
+  astraDialer: 'Astra Dialer',
+  nimbusLookup: 'Nimbus Lookup',
+}
+
+const PhoneCell: FC<{ lead: ApiOutput<typeof api.leads.getMany>[number] }> = ({ lead }) => {
+  const provider = lead.phoneProvider ? (PROVIDER_LABELS[lead.phoneProvider] ?? lead.phoneProvider) : null
+
+  if (lead.phoneEnrichmentStatus === 'pending') {
+    return (
+      <div className="flex items-center gap-2 text-sm text-blue-700">
+        <span className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600" />
+        {provider ? `Searching ${provider}…` : 'Starting…'}
+      </div>
+    )
+  }
+  if (lead.phone) {
+    return (
+      <div className="text-sm text-gray-900">
+        {lead.phone}
+        {provider && <span className="ml-2 text-xs text-gray-500">via {provider}</span>}
+      </div>
+    )
+  }
+  if (lead.phoneEnrichmentStatus === 'not_found') {
+    return <div className="text-sm text-gray-500">No data found</div>
+  }
+  if (lead.phoneEnrichmentStatus === 'failed') {
+    return <div className="text-sm text-red-600">Failed</div>
+  }
+  return <div className="text-sm text-gray-900">-</div>
+}
 
 export const LeadsList: FC = () => {
   const [selectedLeads, setSelectedLeads] = useState<number[]>([])
@@ -16,8 +72,20 @@ export const LeadsList: FC = () => {
     queryKey: ['leads', 'getMany'],
     queryFn: async () => api.leads.getMany(),
     retry: false,
+    // Poll while any lead is being enriched; the workflow writes progress to the DB
+    refetchInterval: (query) =>
+      query.state.data?.some((lead) => lead.phoneEnrichmentStatus === 'pending') ? 2000 : false,
   })
-  
+
+  const pendingPhoneCount = leads.data?.filter((lead) => lead.phoneEnrichmentStatus === 'pending').length ?? 0
+  const previousPendingCount = useRef(0)
+  useEffect(() => {
+    if (previousPendingCount.current > 0 && pendingPhoneCount === 0) {
+      toast.success('Phone enrichment finished')
+    }
+    previousPendingCount.current = pendingPhoneCount
+  }, [pendingPhoneCount])
+
 
   const deleteLeadsMutation = useMutation({
     mutationFn: async (ids: number[]) => api.leads.deleteMany({ ids }),
@@ -51,7 +119,27 @@ export const LeadsList: FC = () => {
     }
   })
 
-  const handleSelectAll = (checked: boolean) => {
+  const enrichPhoneMutation = useMutation({
+    mutationFn: async (ids: number[]) => api.leads.enrichPhone({ leadIds: ids }),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['leads', 'getMany'] })
+      setIsEnrichDropdownOpen(false)
+      const notes = [
+        data.alreadyRunning.length > 0 && `${data.alreadyRunning.length} already in progress`,
+        data.skipped.length > 0 && `${data.skipped.length} already have a phone`,
+        data.errors.length > 0 && `${data.errors.length} failed to start`,
+      ].filter(Boolean)
+      toast.success(
+        `Looking up phones for ${data.started.length} ${data.started.length === 1 ? 'lead' : 'leads'}` +
+          (notes.length > 0 ? ` (${notes.join(', ')})` : '')
+      )
+    },
+    onError: () => {
+      toast.error('Failed to start phone enrichment. Please try again.')
+    },
+  })
+
+  const handleSelectAll =(checked: boolean) => {
     if (checked && leads.data) {
       setSelectedLeads(leads.data.map(lead => lead.id))
     } else {
@@ -159,6 +247,18 @@ export const LeadsList: FC = () => {
                       </div>
                     </button>
                     <button
+                      onClick={() => enrichPhoneMutation.mutate(selectedLeads)}
+                      disabled={enrichPhoneMutation.isPending}
+                      className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50 transition-colors"
+                    >
+                      <div className="flex items-center">
+                        <svg className="mr-3 h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                        </svg>
+                        Enrich Phone
+                      </div>
+                    </button>
+                    <button
                       onClick={() => {
                         toast.error('Gender guessing feature is not yet implemented')
                         setIsEnrichDropdownOpen(false)
@@ -226,14 +326,13 @@ export const LeadsList: FC = () => {
                   Email
                 </th>
                 <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
-                  Job Title
+                  Phone
                 </th>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
-                  Company
-                </th>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
-                  Country
-                </th>
+                {LIST_COLUMNS.map((field) => (
+                  <th key={field.key} scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
+                    {field.label}
+                  </th>
+                ))}
                 <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
                   Message
                 </th>
@@ -267,14 +366,13 @@ export const LeadsList: FC = () => {
                     <div className="text-sm text-gray-900">{lead.email || '-'} {lead.emailVerified === null ? '❓' : lead.emailVerified ? '✅' : '❌'}</div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-900">{lead.jobTitle || '-'}</div>
+                    <PhoneCell lead={lead} />
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-900">{lead.companyName || '-'}</div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-900">{lead.countryCode || '-'}</div>
-                  </td>
+                  {LIST_COLUMNS.map((field) => (
+                    <td key={field.key} className="px-6 py-4 whitespace-nowrap">
+                      <ListCell field={field} value={lead[field.key as keyof typeof lead]} />
+                    </td>
+                  ))}
                   <td className="px-6 py-4">
                     <div className="text-sm text-gray-900 max-w-xs truncate" title={lead.message || ''}>
                       {lead.message || '-'}

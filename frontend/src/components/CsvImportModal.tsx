@@ -3,12 +3,21 @@ import { createPortal } from 'react-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { api } from '../api'
+import { LeadsBulkImportInput } from '../api/types/leads/bulkImport'
 import { CsvLead, parseCsv } from '../utils/csvParser'
+import { LEAD_FIELDS } from '../utils/leadFields'
 
 interface CsvImportModalProps {
   isOpen: boolean
   onClose: () => void
 }
+
+const requiredFields = LEAD_FIELDS.filter((f) => f.required)
+  .map((f) => f.key)
+  .join(', ')
+const optionalFields = LEAD_FIELDS.filter((f) => !f.required)
+  .map((f) => f.key)
+  .join(', ')
 
 export const CsvImportModal: FC<CsvImportModalProps> = ({ isOpen, onClose }) => {
   const [csvData, setCsvData] = useState<CsvLead[]>([])
@@ -93,13 +102,16 @@ export const CsvImportModal: FC<CsvImportModalProps> = ({ isOpen, onClose }) => 
     mutationFn: async (leads: CsvLead[]) => {
       const validLeads = leads.filter((lead) => lead.isValid)
 
-      const leadsToImport = validLeads.map((lead) => ({
+      const leadsToImport = validLeads.map((lead): LeadsBulkImportInput['leads'][number] => ({
         firstName: lead.firstName,
         lastName: lead.lastName,
         email: lead.email,
         jobTitle: lead.jobTitle || undefined,
         countryCode: lead.countryCode || undefined,
         companyName: lead.companyName || undefined,
+        phone: lead.phone || undefined,
+        yearsAtCompany: lead.yearsAtCompany,
+        linkedinUrl: lead.linkedinUrl || undefined,
       }))
 
       return api.leads.bulkImport({ leads: leadsToImport })
@@ -237,8 +249,7 @@ export const CsvImportModal: FC<CsvImportModalProps> = ({ isOpen, onClose }) => 
                     </button>
                   </p>
                   <p className="text-sm text-gray-500">
-                    CSV must include: firstName, lastName, email (required). Optional: jobTitle, countryCode,
-                    companyName
+                    CSV must include: {requiredFields} (required). Optional: {optionalFields}
                   </p>
                 </div>
               )}
@@ -285,6 +296,9 @@ export const CsvImportModal: FC<CsvImportModalProps> = ({ isOpen, onClose }) => 
                         Company
                       </th>
                       <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                        Country
+                      </th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
                         Errors
                       </th>
                     </tr>
@@ -309,6 +323,7 @@ export const CsvImportModal: FC<CsvImportModalProps> = ({ isOpen, onClose }) => 
                         </td>
                         <td className="px-3 py-2 text-sm text-gray-900">{lead.email || '-'}</td>
                         <td className="px-3 py-2 text-sm text-gray-900">{lead.companyName || '-'}</td>
+                        <td className="px-3 py-2 text-sm text-gray-900">{lead.countryCode || '-'}</td>
                         <td className="px-3 py-2 text-sm text-red-600">{lead.errors.join(', ') || '-'}</td>
                       </tr>
                     ))}

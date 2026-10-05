@@ -1,4 +1,7 @@
 import Papa from 'papaparse'
+import { fieldKeyForHeader, isValidEmail, LEAD_FIELDS, LeadFieldKey, parseLead } from './leadFields'
+
+export { isValidEmail }
 
 export interface CsvLead {
   firstName: string
@@ -7,14 +10,12 @@ export interface CsvLead {
   jobTitle?: string
   countryCode?: string
   companyName?: string
+  phone?: string
+  yearsAtCompany?: number
+  linkedinUrl?: string
   isValid: boolean
   errors: string[]
   rowIndex: number
-}
-
-export const isValidEmail = (email: string): boolean => {
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-  return emailRegex.test(email)
 }
 
 export const parseCsv = (content: string): CsvLead[] => {
@@ -48,55 +49,24 @@ export const parseCsv = (content: string): CsvLead[] => {
   parseResult.data.forEach((row, index) => {
     if (Object.values(row).every((value) => !value)) return
 
-    const lead: Partial<CsvLead> = { rowIndex: index + 2 }
-
+    const raw: Partial<Record<LeadFieldKey, string>> = {}
     Object.entries(row).forEach(([header, value]) => {
-      const normalizedHeader = header.toLowerCase().replace(/[^a-z]/g, '')
-      const trimmedValue = value?.trim() || ''
-
-      switch (normalizedHeader) {
-        case 'firstname':
-          lead.firstName = trimmedValue
-          break
-        case 'lastname':
-          lead.lastName = trimmedValue
-          break
-        case 'email':
-          lead.email = trimmedValue
-          break
-        case 'jobtitle':
-          lead.jobTitle = trimmedValue || undefined
-          break
-        case 'countrycode':
-          lead.countryCode = trimmedValue || undefined
-          break
-        case 'companyname':
-          lead.companyName = trimmedValue || undefined
-          break
-      }
+      const key = fieldKeyForHeader(header)
+      if (key) raw[key] = value?.trim() || ''
     })
 
-    const errors: string[] = []
-    if (!lead.firstName?.trim()) {
-      errors.push('First name is required')
-    }
-    if (!lead.lastName?.trim()) {
-      errors.push('Last name is required')
-    }
-    if (!lead.email?.trim()) {
-      errors.push('Email is required')
-    } else if (!isValidEmail(lead.email)) {
-      errors.push('Invalid email format')
-    }
+    const { values, errors } = parseLead(raw)
+    const lead: Record<string, unknown> = {}
+    LEAD_FIELDS.forEach(({ key }) => {
+      lead[key] = values[key] ?? undefined
+    })
 
     data.push({
       ...lead,
-      firstName: lead.firstName || '',
-      lastName: lead.lastName || '',
-      email: lead.email || '',
+      rowIndex: index + 2,
       isValid: errors.length === 0,
       errors,
-    } as CsvLead)
+    } as unknown as CsvLead)
   })
 
   return data
